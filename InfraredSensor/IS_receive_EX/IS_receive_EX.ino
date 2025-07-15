@@ -1,6 +1,6 @@
 int analogPin = A0;
 int sensorValue = 0;
-int th[10] = {550, 525, 480, 415, 350, 290, 225, 201, 175, 170}; //15cm,20cm,25cm,30cm,35cm,40cm,45cm,50cm,60cm,70cm
+int th[10] = {550, 525, 489, 415, 350, 290, 225, 201, 175, 175}; //15cm,20cm,25cm,30cm,35cm,40cm,45cm,50cm,60cm,70cm
 const int datamax = 100;
 int data[datamax];
 
@@ -39,9 +39,10 @@ void loop() {
 
   // 読み取り開始(570以上)
   if (th[0] <= sensorValue ) {
-    Serial.println("読み取り開始");
+    Serial.print("読み取り開始");
+    Serial.println(sensorValue);
     int re = 0;
-    delay(5100);
+    delay(1300);
 
     // 読み取り終了(180以下)になるまで while で回す
     while (sensorValue > th[9]) {
@@ -51,15 +52,16 @@ void loop() {
       if (number >= 0 && number <= 7 && re < datamax) {
         data[re] = number;
         re++;
-        Serial.print(number);
-        Serial.print(",");
-        Serial.println(sensorValue);
       }
+      Serial.print(number);
+      Serial.print(",");
+      Serial.println(sensorValue);
 
-      delay(3700);
+      delay(1000);
     }
 
-    Serial.println("読み取り終了");
+    Serial.print("読み取り終了");
+    Serial.println(sensorValue);
 
 
     for (int i = 0; i < re; i++) {
