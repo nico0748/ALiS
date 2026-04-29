@@ -1,0 +1,186 @@
+@startuml ALiS_Architecture
+title ALiS - 全体データフロー
+
+skinparam rectangle {
+    BackgroundColor<<stage>> #E8F4FD
+    BorderColor<<stage>> #2C7BB6
+}
+skinparam rectangle {
+    BackgroundColor<<user>> #FFF3B0
+    BorderColor<<user>> #B58900
+}
+
+actor "ユーザー" as user
+rectangle "復元文字列\n(Serial)" as out <<user>>
+
+rectangle "【段1】Proc01_Encode_IS1\nArduino + L6470" <<stage>> as S1 {
+    rectangle "符号化テーブル 8x8" as E1
+    rectangle "文字 -> (row,col)" as E2
+    rectangle "ステッピングモータ\n位置 = 距離 mm" as E3
+    E1 --> E2 --> E3
+}
+
+rectangle "【段2】Proc02_IC1_LM2\nArduino" <<stage>> as S2 {
+    rectangle "赤外線距離センサ (A0)" as D1
+    rectangle "閾値 th[0..9]\n→ 数字 0-7 / 開始 / 終了" as D2
+    rectangle "独自モールス変換\n+ Header/Footer" as D3
+    rectangle "レーザー (D9)" as D4
+    D1 --> D2 --> D3 --> D4
+}
+
+rectangle "【段3】Proc03_LM2_FS3\nArduino R4 WiFi" <<stage>> as S3 {
+    rectangle "フォトトランジスタ (A0)" as M1
+    rectangle "エッジ検出 + デバウンス" as M2
+    rectangle "モールス → 数字" as M3
+    rectangle "2色ペア生成" as M4
+    rectangle "RGB LED (D9/D3/D11)" as M5
+    M1 --> M2 --> M3 --> M4 --> M5
+}
+
+rectangle "【段4】Proc04_FS3_Decode\nArduino" <<stage>> as S4 {
+    rectangle "TCS34725 (I2C)" as F1
+    rectangle "色判定 (RGB+C 範囲)" as F2
+    rectangle "状態機械\nHEADER → DATA → FOOTER" as F3
+    rectangle "復号テーブル\n(row,col) → 文字" as F4
+    F1 --> F2 --> F3 --> F4
+}
+
+user --> E1 : "文字列入力\n(Serial)"
+E3 ..> D1 : "赤外線/距離"
+D4 ..> M1 : "レーザー\n光モールス"
+M5 ..> F1 : "可視光\nカラーシーケンス"
+F4 --> out
+
+@enduml
+
+
+@startuml ALiS_StateMachine
+title 段4 受信側 状態遷移 (Proc04_FS3_Decode)
+
+[*] --> WAIT_FOR_HEADER
+
+WAIT_FOR_HEADER --> RECEIVING_DATA_COLOR1 : BLUE (Header)
+WAIT_FOR_HEADER --> WAIT_FOR_HEADER : その他 (警告)
+
+RECEIVING_DATA_COLOR1 --> RECEIVING_DATA_COLOR2 : 赤/薄青/薄緑/シアン
+RECEIVING_DATA_COLOR1 --> COMPLETE : GREEN (Footer)
+RECEIVING_DATA_COLOR1 --> WAIT_FOR_HEADER : 不正な色 (リセット)
+
+RECEIVING_DATA_COLOR2 --> WAIT_FOR_DATA_SEPARATOR : 有効ペア確定
+RECEIVING_DATA_COLOR2 --> COMPLETE : GREEN (Footer)
+RECEIVING_DATA_COLOR2 --> WAIT_FOR_HEADER : 不正な色 (リセット)
+
+WAIT_FOR_DATA_SEPARATOR --> RECEIVING_DATA_COLOR1 : LOWCYAN (Separator)
+WAIT_FOR_DATA_SEPARATOR --> COMPLETE : GREEN (Footer)
+WAIT_FOR_DATA_SEPARATOR --> WAIT_FOR_HEADER : 不正な色 (リセット)
+
+COMPLETE --> [*] : 文字復元 → 停止
+
+@enduml
+
+
+@startuml ALiS_Sequence_Morse
+title 段2 → 段3 モールス送受信シーケンス (UNIT_TIME=100ms)
+
+participant "Arduino送信側" as TX
+participant "レーザー" as LA
+participant "フォトトランジスタ" as PT
+participant "Arduino受信側" as RX
+
+== Header (..---..) ==
+TX -> LA : ON 100ms (.)
+LA -> PT : 光ON
+PT -> RX : 立ち下がりで '.' 確定
+TX -> LA : ON 100ms (.)
+TX -> LA : ON 300ms (-)
+TX -> LA : ON 300ms (-)
+TX -> LA : ON 300ms (-)
+TX -> LA : ON 100ms (.)
+TX -> LA : ON 100ms (.)
+note over RX : Header一致 → resetGetNumBuffer()
+
+== Data: 数字 "2" (-.-) ==
+TX -> LA : ON 300ms (-)
+TX -> LA : OFF 100ms (符号内間隔)
+TX -> LA : ON 100ms (.)
+TX -> LA : OFF 100ms
+TX -> LA : ON 300ms (-)
+TX -> LA : OFF 300ms (文字間隔)
+note over RX : '-.-' → getNum[i]=2
+
+== Footer (.-.-.) ==
+TX -> LA : 「.-.-.」を順送信
+note over RX : Footer検出\n→ outputColorsFromGetNum()\n→ RGB LED発光
+
+@enduml
+
+
+@startuml ALiS_Sequence_Color
+title 段3 → 段4 カラーシーケンス送受信
+
+participant "段3 RGB LED" as TX
+participant "TCS34725" as RX
+participant "状態機械" as SM
+
+== Header ==
+TX -> RX : BLUE 300ms
+RX -> SM : COLOR_BLUE
+note right of SM : WAIT_FOR_HEADER\n→ DATA_COLOR1
+
+== Data=5 (薄青+シアン) ==
+TX -> RX : LOWBLUE 300ms
+RX -> SM : COLOR_LOWBLUE
+note right of SM : DATA_COLOR1\n→ DATA_COLOR2 (A=1)
+TX -> RX : CYAN 300ms
+RX -> SM : COLOR_CYAN
+note right of SM : pair(1,3)=5\n→ WAIT_FOR_DATA_SEPARATOR
+
+== Separator ==
+TX -> RX : LOWCYAN 300ms
+RX -> SM : COLOR_LOWCYAN
+note right of SM : → DATA_COLOR1
+
+== Data=7 (薄緑+薄青) ==
+TX -> RX : LOWGREEN 300ms
+TX -> RX : LOWBLUE 300ms
+note right of SM : pair(2,1)=7
+
+== Footer ==
+TX -> RX : GREEN 300ms
+RX -> SM : COLOR_GREEN
+note right of SM : COMPLETE\n→ row,col → 文字復元
+
+@enduml
+
+
+@startuml ALiS_Hardware
+title ALiS - ハードウェア接続図
+
+node "PC #1" as PC1
+node "Arduino #1" as A1
+node "L6470" as L
+node "ステッピングモータ" as SM
+node "赤外線距離センサ" as IR
+node "Arduino #2" as A2
+node "赤色レーザー" as LASER
+node "フォトトランジスタ" as PT
+node "Arduino R4 WiFi" as A3
+node "RGB LED" as RGB
+node "TCS34725" as TCS
+node "Arduino #4" as A4
+node "PC #2" as PC2
+
+PC1 -- A1 : USB / Serial
+A1 -- L : SPI MODE3 8MHz\n(D10..D13)
+L -- SM : 駆動信号
+SM ..> IR : 物理距離
+IR -- A2 : A0 (ADC)
+A2 -- LASER : D9
+LASER ..> PT : 光モールス
+PT -- A3 : A0 (ADC)
+A3 -- RGB : D9/D3/D11 (PWM)
+RGB ..> TCS : 可視光
+TCS -- A4 : I2C SDA/SCL
+A4 -- PC2 : USB / Serial
+
+@enduml

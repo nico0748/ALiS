@@ -1,0 +1,100 @@
+// ALiS - 全体データフロー (Graphviz / DOT)
+// レンダリング例:
+//   dot -Tpng architecture.dot -o architecture.png
+//   dot -Tsvg architecture.dot -o architecture.svg
+
+digraph ALiS {
+    rankdir=LR;
+    fontname="Helvetica";
+    node [fontname="Helvetica", shape=box, style="rounded,filled", fillcolor="#E8F4FD", color="#2C7BB6"];
+    edge [fontname="Helvetica", color="#444444"];
+
+    user  [label="ユーザー入力\n(文字列)", shape=note, fillcolor="#FFF3B0", color="#B58900"];
+    out   [label="復元文字列\n(Serial)",   shape=note, fillcolor="#FFF3B0", color="#B58900"];
+
+    subgraph cluster_S1 {
+        label="【段1】Proc01_Encode_IS1\n(Arduino + L6470)";
+        style="rounded,dashed";
+        color="#2C7BB6";
+        E1 [label="符号化テーブル 8x8"];
+        E2 [label="文字 → (row,col)"];
+        E3 [label="ステッピングモータ\n位置 = 距離 mm"];
+        E1 -> E2 -> E3;
+    }
+
+    subgraph cluster_S2 {
+        label="【段2】Proc02_IC1_LM2 (Arduino)";
+        style="rounded,dashed";
+        color="#2C7BB6";
+        D1 [label="赤外線距離センサ (A0)"];
+        D2 [label="閾値 th[0..9]\n→ 数字 0-7 / 開始 / 終了"];
+        D3 [label="独自モールス変換\n+ Header / Footer"];
+        D4 [label="レーザー (D9)"];
+        D1 -> D2 -> D3 -> D4;
+    }
+
+    subgraph cluster_S3 {
+        label="【段3】Proc03_LM2_FS3 (Arduino R4 WiFi)";
+        style="rounded,dashed";
+        color="#2C7BB6";
+        M1 [label="フォトトランジスタ (A0)"];
+        M2 [label="エッジ検出 + デバウンス"];
+        M3 [label="モールス → 数字"];
+        M4 [label="2色ペア生成"];
+        M5 [label="RGB LED\n(D9/D3/D11)"];
+        M1 -> M2 -> M3 -> M4 -> M5;
+    }
+
+    subgraph cluster_S4 {
+        label="【段4】Proc04_FS3_Decode (Arduino)";
+        style="rounded,dashed";
+        color="#2C7BB6";
+        F1 [label="TCS34725 (I2C)"];
+        F2 [label="色判定 (RGB+C 範囲)"];
+        F3 [label="状態機械\nHEADER → DATA → FOOTER"];
+        F4 [label="復号テーブル\n(row,col) → 文字"];
+        F1 -> F2 -> F3 -> F4;
+    }
+
+    user -> E1 [label="Serial入力"];
+    E3 -> D1 [label="赤外線/距離", style=dashed];
+    D4 -> M1 [label="レーザー光モールス", style=dashed];
+    M5 -> F1 [label="可視光カラー",     style=dashed];
+    F4 -> out [label="Serial出力"];
+}
+
+
+// ALiS - 段4 受信側 状態遷移
+digraph ALiS_StateMachine {
+    rankdir=LR;
+    fontname="Helvetica";
+    node [fontname="Helvetica", shape=ellipse, style=filled, fillcolor="#E8F4FD", color="#2C7BB6"];
+    edge [fontname="Helvetica"];
+
+    start [shape=circle, label="", width=0.2, fillcolor=black];
+    end   [shape=doublecircle, label="", width=0.25, fillcolor=black];
+
+    WH  [label="WAIT_FOR_HEADER"];
+    D1S [label="RECEIVING_DATA_COLOR1"];
+    D2S [label="RECEIVING_DATA_COLOR2"];
+    SEP [label="WAIT_FOR_DATA_SEPARATOR"];
+    CMP [label="COMPLETE"];
+
+    start -> WH;
+    WH  -> D1S [label="BLUE (Header)"];
+    WH  -> WH  [label="その他 (警告)"];
+
+    D1S -> D2S [label="赤/薄青/薄緑/シアン"];
+    D1S -> CMP [label="GREEN (Footer)"];
+    D1S -> WH  [label="不正な色\n(リセット)"];
+
+    D2S -> SEP [label="有効ペア確定"];
+    D2S -> CMP [label="GREEN (Footer)"];
+    D2S -> WH  [label="不正な色\n(リセット)"];
+
+    SEP -> D1S [label="LOWCYAN\n(Separator)"];
+    SEP -> CMP [label="GREEN (Footer)"];
+    SEP -> WH  [label="不正な色\n(リセット)"];
+
+    CMP -> end [label="文字復元 → 停止"];
+}
