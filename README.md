@@ -1,5 +1,9 @@
 # 結合プログラムに関する概要
 
+> システム全体の構成図・データフロー・状態遷移は [`docs/architecture.md`](docs/architecture.md) を、各段の詳細フローは [`docs/details.md`](docs/details.md) を参照してください。
+> PlantUML / Graphviz 形式は [`docs/architecture.puml`](docs/architecture.puml), [`docs/architecture.dot`](docs/architecture.dot) にあります。
+
+
 #### Proc01_Encode_IC1.ino
 * **符号化テーブルと赤外線センサを利用した情報伝達方法の結合プログラム** 
 
